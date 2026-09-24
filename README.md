@@ -1,0 +1,108 @@
+# nix-gantry
+
+CI builds a container closure once. A host fetches a small JSON manifest,
+realises the store path from a binary cache, atomically swaps a symlink,
+and restarts the container. **The host never evaluates or builds
+anything.**
+
+That's the whole mechanism: `lib.mkContainer` declares a
+`systemd-nspawn` container whose `path` is a live symlink
+(`/var/lib/machines/<name>/current`), and `nixosModules.updater` is the
+systemd timer/units that keep that symlink pointed at whatever your CI
+last published and cache-verified.
+
+## Why
+
+Plain NixOS `containers.*` embeds a container's full configuration in
+your host's own system generation — updating one container means
+re-evaluating and re-building (or at least re-deploying) the whole host.
+On a fleet with several containers per host and several hosts, that adds
+up fast, and it's a hard requirement even for edge devices (a
+Raspberry Pi, a router) that would rather not evaluate a flake at all.
+
+nix-gantry decouples the two: build centrally (wherever you have CPU to
+spare), publish a manifest, and let hosts pull an already-built,
+already-cache-verified artifact on their own schedule — a systemd timer,
+not a rebuild.
+
+## How it compares
+
+| | Host evaluates/builds? | Decoupled from host rebuild? | Scope |
+|---|---|---|---|
+| Plain `containers.*` | Yes, every generation | No | — |
+| [`extra-container`](https://github.com/erikarvstedt/extra-container) | Yes, on every `extra-container create`/`--update-changed` | Partially (skips full host eval, but still host-CLI-driven, no remote artifact) | Containers |
+| [`nixos-container update --refresh`](https://www.leftfold.tech/posts/nixos-continuous-delivery/) (systemd-timer pull pattern) | Yes, evaluates + builds the container's flake on every cycle | Yes (timer-driven) | Containers |
+| [`comin`](https://github.com/nlewo/comin) | Yes, whole-host eval on every deploy | Yes (Git-poll driven) | Whole host, not container-scoped |
+| [`microvm.nix`](https://github.com/astro/microvm.nix) | Yes, at build time | Depends on setup | MicroVMs, not nspawn containers |
+| **nix-gantry** | **No — zero eval/build on the host** | **Yes** | Containers |
+
+The closest prior art (`extra-container`, and the `nixos-container
+update --refresh` pattern) both still build on the host. Neither
+publishes a pre-built artifact a host can consume with nothing but
+`curl` + `nix-store --realise`. That gap — genuinely no Nix evaluation
+on the host at update time — is what nix-gantry is for. It matters
+concretely for a fleet with underpowered or ARM hosts (a Pi, a router, a
+Jetson) that shouldn't need to evaluate or build anything themselves;
+they just pull what a beefier CI runner already built and cache-verified.
+
+## What's in this flake
+
+- **`lib.mkContainer`** — builds a `containers.<name>` block: nspawn
+  networking/capabilities/device passthrough, optional podman-in-nspawn
+  boilerplate, optional mTLS sidecar, and (when the container's name is
+  registered with the updater) the standalone symlink wiring.
+- **`nixosModules.updater`** — the systemd timer/units: stage (fetch
+  manifest, realise, swap symlink — never touches the running
+  container), activate (restart to pick up the staged closure), a bulk
+  nightly orchestrator, and a boot-time bootstrap for a container that's
+  never been staged.
+- **`nixosModules.host`** — per-host glue: bridge/subnet/firewall setup,
+  auto-derives the updater's container list from your enabled
+  containers, optional impermanence persistence wiring.
+- **`nixosModules.default`** — `updater` + `host` composed.
+- **`apps.publish-manifest`** — the CI-side half: builds a system's
+  containers from a `nixosConfiguration`, verifies each is actually
+  cache-reachable (drops anything that isn't rather than blocking), and
+  emits a manifest fragment. See
+  [`.github/workflows/publish-manifest.yaml`](.github/workflows/publish-manifest.yaml)
+  for the reusable workflow that runs this per-system and publishes the
+  merged manifest as a GitHub release asset.
+
+## Quickstart
+
+See [`examples/`](examples/) for a minimal flake consuming
+`nixosModules.default` end to end, runnable via `nixos-rebuild
+build-vm` with no external infrastructure required.
+
+## External requirements
+
+This flake's modules assume a couple of option paths exist in your own
+NixOS config, rather than declaring them itself:
+
+- `config.my.network.bridge` (a string) — only read when a container
+  doesn't set its own `hostBridge`.
+- `config.my.hardware.gpuRenderNode` (a string) — only read when a
+  container sets `enableGPU = true`.
+- The external [`impermanence`](https://github.com/nix-community/impermanence)
+  module's `environment.persistence` option — only needed if you leave
+  `my.container-host.enablePersistence` at its default (`true`).
+- **The bridge interface itself.** `my.container-host` configures
+  firewall rules for `cfg.bridge` but does not create it — declare
+  `networking.bridges.<name>.interfaces = [ ];` yourself (an empty
+  interface list is normal; containers attach to it dynamically at
+  start).
+
+Every container you build with `lib.mkContainer` should declare its own
+options under `my.containers.<name>` (with at least `enable` and, if it
+has persistent state, `hostDataDir`) — `nixosModules.host` derives the
+updater's container list and persistence directories from that
+convention. See [`examples/`](examples/) for a working container preset.
+
+## Status
+
+Early (`v0.1.x`). The mechanism runs a personal NixOS fleet in
+production; the module surface may still change before `v1`.
+
+## License
+
+[MIT](LICENSE)
