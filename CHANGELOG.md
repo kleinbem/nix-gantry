@@ -3,7 +3,17 @@
 See [README's Versioning section](README.md#versioning) for what
 "breaking" means at this stage (`0.x`).
 
-## v0.2.0 (unreleased)
+## v0.2.0
+
+**Added:**
+- README gains [Non-goals](README.md#non-goals) and
+  [Versioning](README.md#versioning) sections — a stated scope
+  boundary and the SemVer policy this changelog follows.
+- `apps.publish-manifest` gets real test coverage for the first time:
+  `examples/flake.nix` exposes `nixosConfigurations.quickstart-factory`
+  as a fixture, and CI runs the script against it end to end.
+- A generated options reference: `packages.options-doc`, committed as
+  [`docs/OPTIONS.md`](docs/OPTIONS.md).
 
 **Breaking:**
 - `lib.mkContainer`'s `cfg.hostBridge` is now a required field (was
