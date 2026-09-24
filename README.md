@@ -58,8 +58,14 @@ they just pull what a beefier CI runner already built and cache-verified.
   never been staged.
 - **`nixosModules.host`** — per-host glue: bridge/subnet/firewall setup,
   auto-derives the updater's container list from your enabled
-  containers, optional impermanence persistence wiring.
-- **`nixosModules.default`** — `updater` + `host` composed.
+  containers.
+- **`nixosModules.host-persistence`** — optional, not part of `default`:
+  wires enabled containers' `hostDataDir`s into
+  [`impermanence`](https://github.com/nix-community/impermanence)'s
+  `environment.persistence`. Import it alongside impermanence itself if
+  you use it.
+- **`nixosModules.default`** — `updater` + `host` composed
+  (`host-persistence` is opt-in, see above).
 - **`apps.publish-manifest`** — the CI-side half: builds a system's
   containers from a `nixosConfiguration`, verifies each is actually
   cache-reachable (drops anything that isn't rather than blocking), and
@@ -73,6 +79,11 @@ they just pull what a beefier CI runner already built and cache-verified.
 See [`examples/`](examples/) for a minimal flake consuming
 `nixosModules.default` end to end, runnable via `nixos-rebuild
 build-vm` with no external infrastructure required.
+
+## Options reference
+
+[`docs/OPTIONS.md`](docs/OPTIONS.md) — every `my.container-host.*` and
+`my.services.container-updater.*` option, generated from source.
 
 ## External requirements
 
@@ -101,9 +112,42 @@ has persistent state, `hostDataDir`) — `nixosModules.host` derives the
 updater's container list and persistence directories from that
 convention. See [`examples/`](examples/) for a working container preset.
 
+## Non-goals
+
+Things this flake deliberately does not do, so a feature request has
+something to check itself against:
+
+- **Build or manage container images/OCI artifacts.** `usesPodman`
+  wires nspawn's storage bind-mount correctly; pulling actual images is
+  your container's own service config, not this flake's job.
+- **Manage secrets.** Bring your own (sops-nix, agenix, ...) and bind-mount
+  or pass them in via `cfg.secretsFile`.
+- **Own DNS or reverse-proxy config.** A container gets an IP; how
+  traffic reaches it is your concern.
+- **Orchestrate multi-container application topologies.** One
+  `mkContainer` call is one systemd-nspawn container. Dependencies
+  between containers are your own `systemd.services.*` wiring, not a
+  compose-like graph this flake understands.
+- **Run or manage a binary cache.** `apps.publish-manifest` verifies
+  cache-reachability against substituters you configure; it doesn't
+  stand one up.
+- **Provision or bootstrap hosts.** This assumes a running NixOS
+  system already exists (disko/nixos-anywhere/etc. are a layer below).
+
+## Versioning
+
+Pre-`1.0`, following the common `0.x` convention: **`0.MINOR` bumps are
+breaking, `0.PATCH` bumps are not.** "Breaking" means: a `lib.mkContainer`
+argument becomes required or changes meaning, a `my.container-host`/
+`my.services.container-updater` option is removed/renamed, or a default
+value change alters behavior for an existing consumer who didn't set
+that option explicitly (as opposed to, say, a new optional field, a bug
+fix, or added test coverage). See [`CHANGELOG.md`](CHANGELOG.md) for
+what actually shipped in each release.
+
 ## Status
 
-Early (`v0.1.x`). The mechanism runs a personal NixOS fleet in
+Early (`v0.x`). The mechanism runs a personal NixOS fleet in
 production; the module surface may still change before `v1`.
 
 ## License

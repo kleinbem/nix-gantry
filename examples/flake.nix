@@ -102,9 +102,18 @@
         };
     in
     {
-      nixosConfigurations.quickstart = lib.nixosSystem {
-        inherit system;
-        modules = [ host ];
+      nixosConfigurations = {
+        quickstart = lib.nixosSystem {
+          inherit system;
+          modules = [ host ];
+        };
+        # Exposed purely so CI can test apps.publish-manifest against a
+        # real, buildable containers.<name>.path -- see
+        # ../.github/workflows/ci.yaml. Not part of the quickstart story
+        # itself; a real consumer's CI targets their own factory-mode
+        # nixosConfiguration the same way (isolated, non-standalone
+        # build, exactly like `factoryEval` above).
+        quickstart-factory = factoryEval;
       };
     };
 }

@@ -17,10 +17,68 @@
       perSystem =
         {
           pkgs,
+          lib,
           ...
         }:
+        let
+          # Options reference generation: evaluate the three modules as
+          # part of a real (if minimal) nixosSystem, so the standard
+          # namespaces they read/write (containers, networking, systemd,
+          # environment.etc) come from the real NixOS module set instead
+          # of needing individual shims -- only my.containers/my.network
+          # (this fleet's own convention) and environment.persistence
+          # (the external impermanence module) are genuinely outside
+          # both this flake and nixpkgs (see each module's header
+          # comment) and need stubbing; my.services.container-updater.*
+          # comes from updater.nix itself, already in the module set.
+          allOptions =
+            (inputs.nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                ./modules/host.nix
+                ./modules/updater.nix
+                ./modules/host-persistence.nix
+                {
+                  options = {
+                    my.containers = lib.mkOption {
+                      type = lib.types.attrsOf lib.types.attrs;
+                      default = { };
+                      description = "Doc-generation stub for your own container presets' options -- not declared by this flake.";
+                    };
+                    my.network = lib.mkOption {
+                      type = lib.types.attrsOf lib.types.anything;
+                      default = { };
+                      description = "Doc-generation stub for your own fleet-wide network config -- not declared by this flake.";
+                    };
+                    # Genuinely external (the impermanence module, not
+                    # part of nixpkgs) -- everything else here comes
+                    # from the real NixOS module set via nixosSystem.
+                    environment.persistence = lib.mkOption {
+                      type = lib.types.attrsOf lib.types.attrs;
+                      default = { };
+                      description = "Doc-generation stub for the external impermanence module -- not declared by this flake.";
+                    };
+                  };
+                  config.system.stateVersion = lib.mkDefault "25.11";
+                }
+              ];
+            }).options;
+          # nixosSystem pulls in the whole NixOS option tree (hundreds
+          # of unrelated options); only render what this flake actually
+          # declares.
+          optionsDoc = pkgs.nixosOptionsDoc {
+            options = {
+              my = {
+                inherit (allOptions.my) container-host;
+                services.container-updater = allOptions.my.services.container-updater;
+              };
+            };
+          };
+        in
         {
           formatter = pkgs.nixfmt-rfc-style;
+
+          packages.options-doc = optionsDoc.optionsCommonMark;
 
           checks = {
             # Hand-rolled in place of git-hooks.nix (removed as a flake

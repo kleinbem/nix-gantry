@@ -14,8 +14,24 @@ jobs:
       - uses: cachix/install-nix-action@v31.10.6
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-      # nix flake check's pre-commit-check derivation already enforces
-      # formatting (the nixfmt hook) -- no separate `nix fmt` step needed,
-      # and `formatter` here is a raw nixfmt-rfc-style, not a treefmt
-      # wrapper, so it has no --fail-on-change flag to invoke anyway.
+      # nix flake check's checks.lint derivation already enforces
+      # formatting (the nixfmt check) -- no separate `nix fmt` step
+      # needed, and `formatter` here is a raw nixfmt-rfc-style, not a
+      # treefmt wrapper, so it has no --fail-on-change flag to invoke
+      # anyway.
       - run: nix flake check -L
+      # apps.publish-manifest can't be exercised inside a sandboxed nix
+      # build (it shells out to `nix build`/`nix eval` itself, which
+      # needs recursive-nix), so it's tested here in real CI instead,
+      # against examples/'s isolated factory build -- exactly the shape
+      # a real consumer's own manifest-publishing CI targets.
+      - name: Test apps.publish-manifest against the example flake
+        run: |
+          cd examples
+          nix run ..#publish-manifest -- \
+            --flake-ref . --config quickstart-factory --system x86_64-linux \
+            > /tmp/fragment.json
+          cat /tmp/fragment.json
+          store_path=$(jq -er '.["x86_64-linux"]["hello"]' /tmp/fragment.json)
+          echo "Got store path: $store_path"
+          nix path-info "$store_path"
