@@ -76,21 +76,24 @@ build-vm` with no external infrastructure required.
 
 ## External requirements
 
-This flake's modules assume a couple of option paths exist in your own
-NixOS config, rather than declaring them itself:
+`nixosModules.host` creates the bridge interface it configures firewall
+rules for (`networking.bridges.<name>.interfaces = [ ]`, via
+`lib.mkDefault` so your own definition wins if you already have one),
+and `enablePersistence` defaults to `false` — the external
+[`impermanence`](https://github.com/nix-community/impermanence) module
+is only required if you opt into it.
 
-- `config.my.network.bridge` (a string) — only read when a container
-  doesn't set its own `hostBridge`.
-- `config.my.hardware.gpuRenderNode` (a string) — only read when a
-  container sets `enableGPU = true`.
-- The external [`impermanence`](https://github.com/nix-community/impermanence)
-  module's `environment.persistence` option — only needed if you leave
-  `my.container-host.enablePersistence` at its default (`true`).
-- **The bridge interface itself.** `my.container-host` configures
-  firewall rules for `cfg.bridge` but does not create it — declare
-  `networking.bridges.<name>.interfaces = [ ];` yourself (an empty
-  interface list is normal; containers attach to it dynamically at
-  start).
+`lib.mkContainer` reads no option paths outside what you pass it
+directly: `cfg.hostBridge` is a required field (no fallback to a
+config path this flake doesn't own), and `cfg.gpuRenderNode` is
+required when a container sets `enableGPU = true`. If you want these
+to default from your own config (e.g. a fleet-wide
+`config.my.network.bridge`), do that at your own call site — see
+[`nix-presets`](https://github.com/kleinbem/nix-presets)'s
+`mkContainer` re-export for the pattern: it injects fleet-specific
+defaults for both fields before calling into this flake's `mkContainer`,
+so nix-gantry itself stays option-path-agnostic while the fleet keeps
+its own convention.
 
 Every container you build with `lib.mkContainer` should declare its own
 options under `my.containers.<name>` (with at least `enable` and, if it

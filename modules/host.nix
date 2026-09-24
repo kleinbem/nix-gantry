@@ -1,7 +1,9 @@
 # Container Host Module
 #
-# Provides common setup for devices that host containers: networking,
-# persistence, and wiring containers into nixosModules.updater.
+# Provides common setup for devices that host containers: networking
+# and wiring containers into nixosModules.updater. No external option
+# or module dependencies -- see ./host-persistence.nix for the
+# (separate, opt-in) impermanence wiring.
 #
 # Usage in host config:
 #
@@ -28,16 +30,6 @@
 #     # (see ../lib/factory.nix), following the same my.containers.<name>
 #     # convention this module and mkContainer both assume.
 #   };
-#
-# External option/module contract, beyond what this flake declares itself:
-#   - enablePersistence (default true) configures environment.persistence,
-#     which comes from the external `impermanence` NixOS module
-#     (github:nix-community/impermanence) -- not a dependency of this
-#     flake. Set enablePersistence = false if you don't use impermanence.
-#   - The persistence block reads config.my.containers.<name>.hostDataDir
-#     for each enabled container -- only forced when enablePersistence is
-#     true, matching the my.containers.<name> convention your own
-#     container presets (built with lib.mkContainer) should follow.
 
 {
   config,
@@ -109,9 +101,11 @@ in
       '';
     };
 
-    enablePersistence = lib.mkEnableOption "Impermanence for container host" // {
-      default = true;
-    };
+    # Defaults to false. Also import nixosModules.host-persistence
+    # (alongside the external impermanence module) to use this -- see
+    # that module's header comment for why it's split out rather than
+    # just gated here.
+    enablePersistence = lib.mkEnableOption "Impermanence for container host";
   };
 
   config = lib.mkIf cfg.enable {
@@ -119,6 +113,13 @@ in
     my.network = {
       inherit (cfg) subnet hostAddress;
     };
+
+    # Firewall rules below assume this bridge exists; create it (empty
+    # -- containers attach dynamically at start) if nothing else
+    # already has. mkDefault so a consumer who declares this bridge
+    # elsewhere (e.g. alongside libvirtd/podman networking) keeps
+    # their own definition untouched.
+    networking.bridges.${cfg.bridge}.interfaces = lib.mkDefault [ ];
 
     # ─── Firewall Rules for Container Traffic ───────────────────
     # Allow container traffic on the bridge
@@ -157,31 +158,6 @@ in
       # build it embedded again instead of pulled/cached.
       containers = lib.subtractLists cfg.excludeFromStandalone (lib.attrNames config.containers);
       excludeFromNightly = cfg.excludeFromUpdater;
-    };
-
-    # ─── Persistence for Container State ────────────────────────
-    # Container data directories are preserved across reboots
-    # (especially important on impermanent hosts like core-pi)
-    environment.persistence = lib.mkIf cfg.enablePersistence {
-      "/nix/persist" = {
-        directories =
-          let
-            # Extract all hostDataDir values from enabled containers
-            containerDirs = lib.concatMap (
-              name:
-              (
-                let
-                  container = config.my.containers.${name};
-                in
-                if container.enable or false then
-                  lib.optional ((container.hostDataDir or null) != null) container.hostDataDir
-                else
-                  [ ]
-              )
-            ) (lib.attrNames config.my.containers);
-          in
-          lib.unique containerDirs;
-      };
     };
 
     # ─── Systemd Service Dependencies ────────────────────────────

@@ -22,19 +22,17 @@
 let
   inherit (pkgs) system;
 
-  # Minimal option shims a bare NixOS eval needs before it can build a
-  # mkContainer-produced containers.<name> closure or import
-  # nixosModules.host -- see lib/factory.nix's header comment. A real
-  # consumer's own NixOS config already has my.network.bridge; this
-  # flake doesn't declare it itself.
+  # Minimal option shim a bare NixOS eval needs before it can import
+  # nixosModules.host: it writes my.network.subnet/hostAddress (for
+  # other fleet modules to read back, not consumed by this flake
+  # itself), so something has to declare them. No my.network.bridge or
+  # environment.persistence stub needed anymore -- lib.mkContainer takes
+  # hostBridge/gpuRenderNode directly on cfg now (see lib/factory.nix's
+  # header comment), and enablePersistence defaults to false.
   shimModule =
     { lib, ... }:
     {
       options.my.network = {
-        bridge = lib.mkOption {
-          type = lib.types.str;
-          default = "cbr0";
-        };
         subnet = lib.mkOption {
           type = lib.types.str;
           default = "";
@@ -44,27 +42,11 @@ let
           default = "";
         };
       };
-      # A minimal stand-in for the external `impermanence` module's
-      # environment.persistence option (see modules/host.nix's header
-      # comment) -- enough to satisfy the module system's "does this
-      # option exist" check for tests, which run with
-      # enablePersistence = false anyway. A real consumer without
-      # impermanence would declare a stub like this too.
-      options.environment.persistence = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule {
-            options.directories = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [ ];
-            };
-          }
-        );
-        default = { };
-      };
     };
 
   demoCfg = {
     ip = "10.233.1.2/24";
+    hostBridge = "cbr0";
     # The real-world default. A prior version of this test set this to
     # false to sidestep an apparent boot-time race against
     # container-updater-bootstrap -- that turned out to be a bug in the
@@ -160,19 +142,11 @@ let
         subnet = "10.233.1.0/24";
         hostAddress = "10.233.1.1";
         inherit manifestUrl;
-        # Needs the external `impermanence` NixOS module (environment.persistence)
-        # which this flake doesn't depend on -- see modules/host.nix's header
-        # comment. Off here since these tests don't exercise persistence.
-        enablePersistence = false;
+        # enablePersistence and the bridge interface both default
+        # correctly now -- nothing to override here.
       };
 
       my.services.container-updater.containers = [ "demo" ];
-
-      # my.container-host only configures firewall rules for cfg.bridge
-      # -- it does NOT create the bridge interface itself (confirmed
-      # live: "Failed to add interface vb-demo to bridge cbr0: No such
-      # device" without this). A real consumer must declare this too.
-      networking.bridges.cbr0.interfaces = [ ];
 
       networking.firewall.enable = false;
       system.stateVersion = "25.11";
@@ -226,12 +200,12 @@ in
     let
       built = self.lib.mkContainer {
         config = {
-          my.network.bridge = "cbr0";
           my.services.container-updater.containers = [ ];
         };
         name = "demo-podman";
         cfg = {
           ip = "10.233.2.2/24";
+          hostBridge = "cbr0";
           hostDataDir = "/var/lib/demo-podman";
         };
         usesPodman = true;

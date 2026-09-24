@@ -37,12 +37,6 @@
       # container@ race its own boot-time start against staging.
       demoContainer = {
         imports = [
-          {
-            options.my.network.bridge = lib.mkOption {
-              type = lib.types.str;
-              default = "cbr0";
-            };
-          }
           (
             { config, ... }:
             nix-gantry.lib.mkContainer {
@@ -50,6 +44,7 @@
               name = "hello";
               cfg = {
                 ip = "10.233.1.2/24";
+                hostBridge = "cbr0";
                 autoStart = true;
               };
               innerConfig = demoInnerConfig;
@@ -94,14 +89,13 @@
             subnet = "10.233.1.0/24";
             hostAddress = "10.233.1.1";
             manifestUrl = "file://${manifestFile}";
-            enablePersistence = false; # needs the external impermanence module otherwise
+            # enablePersistence defaults to false and the bridge
+            # interface is created automatically -- nothing else needed
+            # here. See README's "External requirements" for what's
+            # genuinely still on you (none of it, for this minimal case).
           };
 
           my.services.container-updater.containers = [ "hello" ];
-
-          # my.container-host configures firewall rules for the bridge
-          # but doesn't create it -- see README's "External requirements".
-          networking.bridges.cbr0.interfaces = [ ];
 
           networking.firewall.enable = false;
           system.stateVersion = "25.11";

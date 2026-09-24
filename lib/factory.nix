@@ -5,15 +5,12 @@
 # atomically, decoupling this container's updates from the host's own
 # nixos-rebuild cadence entirely. See ../README.md for the full picture.
 #
-# External option-path contract: this function reads two option paths
-# it does NOT declare itself -- `config.my.network.bridge` (only used
-# when a container doesn't set its own `cfg.hostBridge`) and
-# `config.my.hardware.gpuRenderNode` (only used when `enableGPU = true`).
-# Your own NixOS config needs to provide these two paths (or always pass
-# `cfg.hostBridge` explicitly and avoid `enableGPU`) -- they aren't
-# declared by any module in this flake, since this fleet's own `my.*`
-# option namespace predates this extraction. A future release may lift
-# this constraint; tracked as a known limitation, not a bug.
+# No external option-path dependencies: `cfg.hostBridge` and (when
+# enableGPU = true) `cfg.gpuRenderNode` are required fields on `cfg`
+# itself, not read from any config path this flake doesn't declare. A
+# wrapper that wants to default these from its own config (e.g. a
+# fleet-wide `config.my.network.bridge`) can do so at the call site --
+# see nix-presets' own mkContainer re-export for that pattern.
 { lib }:
 {
   name,
@@ -153,9 +150,9 @@ in
     ephemeral = true;
     autoStart = cfg.autoStart or true;
     privateNetwork = true;
-    hostBridge = cfg.hostBridge or config.my.network.bridge;
+    hostBridge = cfg.hostBridge;
     localAddress = cfg.ip;
-    privateUsers = if (cfg ? privateUsers) then cfg.privateUsers else "no";
+    privateUsers = cfg.privateUsers or "no";
     # THE actual extension point nixpkgs reads (nixos-containers.nix:
     # "TimeoutStartSec = cfg.timeoutStartSec;", a plain non-priority
     # assignment) — NOT systemd.services."container@${name}"
@@ -169,7 +166,7 @@ in
     allowedDevices =
       (lib.optionals enableGPU [
         {
-          node = config.my.hardware.gpuRenderNode;
+          node = cfg.gpuRenderNode;
           modifier = "rw";
         }
       ])
