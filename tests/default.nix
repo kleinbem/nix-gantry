@@ -65,19 +65,14 @@ let
 
   demoCfg = {
     ip = "10.233.1.2/24";
-    # false: autoStart only matters for a container that's ALREADY
-    # staged (it's what brings it back up after a reboot). On a
-    # completely fresh, never-staged container, autoStart races
-    # container@'s own boot-time start attempts against
-    # container-updater-bootstrap's staging -- confirmed live in this
-    # test matrix: the unit's rapid early restarts exhaust
-    # StartLimitBurst before staging finishes, so by the time bootstrap
-    # tries to start it, `container@demo` is already stuck in
-    # start-limit-hit and needs `systemctl reset-failed` to recover.
-    # That's a real timing edge case worth its own coverage some day,
-    # but not what these tests are checking -- drive activation
-    # explicitly instead.
-    autoStart = false;
+    # The real-world default. A prior version of this test set this to
+    # false to sidestep an apparent boot-time race against
+    # container-updater-bootstrap -- that turned out to be a bug in the
+    # test itself (see mkHostNode's `imports` comment), not in the
+    # module: ConditionPathExists correctly gates container@ from
+    # starting before staging, once the test actually wires up the full
+    # mkContainer return value instead of just `.containers`.
+    autoStart = true;
   };
 
   demoInnerConfig = {
@@ -135,6 +130,29 @@ let
         self.nixosModules.host
         self.nixosModules.updater
         shimModule
+        # The WHOLE return value of mkContainer, not just `.containers` --
+        # it also carries systemd.services."container@demo".unitConfig
+        # (ConditionPathExists, StartLimitBurst, Restart=on-failure) and
+        # tmpfiles rules as sibling top-level keys. Extracting only
+        # `.containers` (as an earlier version of this test did) silently
+        # drops ConditionPathExists, which is exactly why a first draft of
+        # this test saw container@demo hit real "No such file or
+        # directory" exit-code failures instead of gracefully skipping
+        # via the condition -- confirmed live via a dedicated diagnostic
+        # test (ConditionResult=yes with no ConditionPathExists= at all in
+        # `systemctl cat`). Real presets merge the full return value the
+        # same way (see nix-presets/containers/*.nix's `mkMerge [
+        # (self.lib.mkContainer {...}) {...} ]` pattern) -- this was a
+        # test-harness bug, not a bug in the module itself.
+        (
+          { config, ... }:
+          self.lib.mkContainer {
+            inherit config;
+            name = "demo";
+            cfg = demoCfg;
+            innerConfig = demoInnerConfig;
+          }
+        )
       ];
 
       my.container-host = {
@@ -148,24 +166,13 @@ let
         enablePersistence = false;
       };
 
+      my.services.container-updater.containers = [ "demo" ];
+
       # my.container-host only configures firewall rules for cfg.bridge
       # -- it does NOT create the bridge interface itself (confirmed
       # live: "Failed to add interface vb-demo to bridge cbr0: No such
       # device" without this). A real consumer must declare this too.
       networking.bridges.cbr0.interfaces = [ ];
-
-      inherit
-        (self.lib.mkContainer {
-          config = {
-            my.network.bridge = "cbr0";
-            my.services.container-updater.containers = [ "demo" ];
-          };
-          name = "demo";
-          cfg = demoCfg;
-          innerConfig = demoInnerConfig;
-        })
-        containers
-        ;
 
       networking.firewall.enable = false;
       system.stateVersion = "25.11";

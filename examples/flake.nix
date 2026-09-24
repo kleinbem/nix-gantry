@@ -28,15 +28,24 @@
       # convention nix-gantry's modules expect. A real preset declares
       # its own options.my.containers.<name>; this quickstart inlines
       # it for brevity.
-      demoContainer =
-        { config, ... }:
-        {
-          options.my.network.bridge = lib.mkOption {
-            type = lib.types.str;
-            default = "cbr0";
-          };
-          config.containers =
-            (nix-gantry.lib.mkContainer {
+      #
+      # Imports the WHOLE mkContainer return value, not just its
+      # `.containers` key -- it also carries
+      # systemd.services."container@hello".unitConfig (ConditionPathExists,
+      # StartLimitBurst, Restart=on-failure) as a sibling top-level key.
+      # Extracting only `.containers` silently drops that and lets
+      # container@ race its own boot-time start against staging.
+      demoContainer = {
+        imports = [
+          {
+            options.my.network.bridge = lib.mkOption {
+              type = lib.types.str;
+              default = "cbr0";
+            };
+          }
+          (
+            { config, ... }:
+            nix-gantry.lib.mkContainer {
               inherit config;
               name = "hello";
               cfg = {
@@ -44,8 +53,10 @@
                 autoStart = true;
               };
               innerConfig = demoInnerConfig;
-            }).containers;
-        };
+            }
+          )
+        ];
+      };
 
       # Built in isolated (non-standalone) mode -- no
       # my.services.container-updater registration in scope, so
@@ -85,6 +96,8 @@
             manifestUrl = "file://${manifestFile}";
             enablePersistence = false; # needs the external impermanence module otherwise
           };
+
+          my.services.container-updater.containers = [ "hello" ];
 
           # my.container-host configures firewall rules for the bridge
           # but doesn't create it -- see README's "External requirements".
