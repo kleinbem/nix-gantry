@@ -291,6 +291,14 @@ in
               };
 
               system.stateVersion = mkDefault "25.11";
+
+              # Prevent broken services from restarting endlessly:
+              # Trips the burst limit after 5 failures in 15 minutes, transitioning
+              # the unit into "failed" state so crash-loops don't run silently.
+              systemd.settings.Manager = {
+                DefaultStartLimitIntervalSec = "15m";
+                DefaultStartLimitBurst = 5;
+              };
               nixpkgs.config = {
                 allowUnfree = true;
                 allowUnfreePredicate = _: true;
@@ -440,7 +448,7 @@ in
   # genuinely broken container from restart-looping forever silently.
   systemd.services."container@${name}" = {
     unitConfig = {
-      StartLimitIntervalSec = 300;
+      StartLimitIntervalSec = 900;
       StartLimitBurst = 5;
     }
     // (lib.optionalAttrs isStandalone {
@@ -450,6 +458,8 @@ in
       {
         Restart = "on-failure";
         RestartSec = "10s";
+        RestartSteps = 5;
+        RestartMaxDelaySec = "5m";
       }
       (mkIf
         (
